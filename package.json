@@ -1,0 +1,28 @@
+{
+  "name": "discord-quiz-bot",
+  "version": "1.0.0",
+  "description": "",
+  "main": "index.js",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1",
+    "start.dev": "nodemon ./src/index.js"
+  },
+  "author": "Ashley",
+  "license": "ISC",
+  "dependencies": {
+    "@discordjs/builders": "^1.6.3",
+    "@discordjs/rest": "^1.7.1",
+    "discord": "^0.8.2",
+    "discord.js": "^14.10.2",
+    "dotenv": "^16.0.3",
+    "fs-extra": "^11.1.1",
+    "node": "^20.0.0",
+    "request": "^2.88.2",
+    "xlsx": "^0.18.5"
+  },
+  "type": "module",
+  "devDependencies": {
+    "eslint": "^8.39.0",
+    "nodemon": "^2.0.22"
+  }
+}
