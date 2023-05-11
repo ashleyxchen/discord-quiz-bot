@@ -3,7 +3,6 @@ import { REST } from '@discordjs/rest';
 import { config } from 'dotenv';
 import setDeckCommand from './commands/setDeck.js';
 import runDeckCommand from './commands/runDeck.js';
-import keywordExtractor from './components/keywordExtractor.js';
 import answerComparator from './components/answerComparator.js';
 import request from 'request';
 import fs from 'fs';
@@ -28,10 +27,10 @@ client.on('ready', () => {
 
 // TODO: condense download function
 async function download(url, name, channel) {
-  if (fs.existsSync(`./src/keywordFiles/${channel}`)) {
-    await emptyDir(`./src/keywordFiles/${channel}`)
+  if (fs.existsSync(`./src/files/${channel}`)) {
+    await emptyDir(`./src/files/${channel}`)
       .then(() => {
-        console.log(`Successfully deleted previous keyword files in ./src/keywordFiles/${channel}`);
+        console.log(`Successfully deleted previous keyword files in ./src/files/${channel}`);
       })
       .catch((err) => {
         console.error(err);
@@ -43,15 +42,15 @@ async function download(url, name, channel) {
         .on('error', (err) => {
           reject(err);
         })
-        .pipe(fs.createWriteStream(`./src/keywordFiles/${channel}/${name}_keywordFile.xlsx`))
+        .pipe(fs.createWriteStream(`./src/files/${channel}/${name}.xlsx`))
         .on('close', () => {
-          console.log(`Successfully added to ./src/keywordFiles/${channel}/${name}_keywordFile.xlsx`);
+          console.log(`Successfully added to ./src/files/${channel}/${name}.xlsx`);
           resolve();
         });
     });
   } else {
     return new Promise((resolve, reject) => {
-      fs.mkdir(`./src/keywordFiles/${channel}`, (err) => {
+      fs.mkdir(`./src/files/${channel}`, (err) => {
         if (err) {
           console.error(err);
           reject(err);
@@ -61,9 +60,9 @@ async function download(url, name, channel) {
             .on('error', (err) => {
               reject(err);
             })
-            .pipe(fs.createWriteStream(`./src/keywordFiles/${channel}/${name}_keywordFile.xlsx`))
+            .pipe(fs.createWriteStream(`./src/files/${channel}/${name}.xlsx`))
             .on('close', () => {
-              console.log(`Successfully added to ./src/keywordFiles/${channel}/${name}_keywordFile.xlsx`);
+              console.log(`Successfully added to ./src/files/${channel}/${name}.xlsx`);
               resolve();
             });
         }
@@ -82,9 +81,8 @@ client.on('interactionCreate', (interaction) => {
 
       console.log('the attachment url is ' + interaction.options.getAttachment('attachment').url);
 
-      async function downloadAndExtractKeywords(url, name, channel, interaction) {
+      async function downloadAndExtractKeywords(url, name, channel) {
         await download(url, name, channel);
-        await keywordExtractor(`./src/keywordFiles/${channel}/${name}_keywordFile.xlsx`, interaction);
       }
 
       downloadAndExtractKeywords(url, name, channel, interaction);
@@ -95,7 +93,6 @@ client.on('interactionCreate', (interaction) => {
         }."`,
       });
     }
-
 
     if (interaction.commandName === 'end') {
       interaction.reply({
@@ -111,9 +108,9 @@ let firstFile;
 async function getFile(interaction) {
   let channel = interaction.channel.id;
 
-  if (fs.existsSync(`./src/keywordFiles/${channel}`)) {
+  if (fs.existsSync(`./src/files/${channel}`)) {
     const files = await new Promise((resolve, reject) => {
-      fs.readdir(`./src/keywordFiles/${channel}`, (err, files) => {
+      fs.readdir(`./src/files/${channel}`, (err, files) => {
         if (err) reject(err);
         else resolve(files);
       });
@@ -123,9 +120,8 @@ async function getFile(interaction) {
     });
 
     firstFile = files[0];
-    console.log('This is the first file: ' + firstFile);
 
-    let workbook = XLSX.readFile(`./src/keywordFiles/${channel}/${firstFile}`);
+    let workbook = XLSX.readFile(`./src/files/${channel}/${firstFile}`);
     let worksheet = workbook.Sheets['Sheet1'];
     return worksheet;
   } else {
@@ -148,24 +144,65 @@ client.on('interactionCreate', async (interaction) => {
         // Iterate through questons
         for (let rowNum = range.s.r + 1; rowNum <= range.e.r; rowNum++) {
           let question = worksheet[XLSX.utils.encode_cell({ r: rowNum, c: 0 })].v;
-          let keywords = worksheet[XLSX.utils.encode_cell({ r: rowNum, c: 2 })].v;
 
           await interaction.channel.send('Question #' + rowNum + ': ' + question);
-          const filter = (m) => m.content.startsWith('/a');
+
+          const filterAnswer = (m) => m.content.startsWith('/a');
+          const filterEnd = (m) => m.content.startsWith('/end');
+          let doBreak = false;
+
           const userAnswer = await interaction.channel.awaitMessages({
-            filter,
+            filter: filterAnswer,
             max: 1,
-            time: 300000, 
+            time: 300000,
+          });
+
+          // endAnswer = interaction.channel.awaitMessages({
+          //   filter: filterEnd,
+          //   max: 1,
+          //   time: 300000,
+          // });
+
+          // console.log(endAnswer)
+
+          const endAnswer = interaction.channel.awaitMessages({
+            filter: filterEnd,
+            max: 1,
+            time: 300000,
+          });
+
+          // Wait for both promises to resolve
+          await Promise.all([userAnswer, endAnswer]).then((results) => {
+            const userMessage = results[0].first(); // Get the first (and only) message in userAnswer
+            const endMessage = results[1].first(); // Get the first (and only) message in endAnswer
+
+            if (endMessage && endMessage.content.startsWith('/end')) {
+              console.log('User ended the quiz.');
+              doBreak = true;
+            } else {
+              console.log('User did not end the quiz.');
+              // Do something else here
+            }
           });
 
           if (!userAnswer.size) {
             await interaction.followUp('Time is up! Next question.');
+            continue;
+          }
+
+          // if (endAnswer != '') {
+          //   console.log('broken!!!');
+          //   break;
+          // }
+
+          if (doBreak == true) {
+            interaction.channel.send(`Your blurt session in ${interaction.channel} has ended.`);
             break;
           }
 
           const answer = userAnswer.first().content.slice(3);
 
-          async function getAnswerAndCompare(interaction, rowNum, keywords, answer, firstFile) {
+          async function getAnswerAndCompare(interaction, rowNum, answer, firstFile) {
             let worksheet = await getFile(interaction);
 
             if (worksheet === null) {
@@ -173,18 +210,17 @@ client.on('interactionCreate', async (interaction) => {
               return;
             }
 
-            let feedback = await answerComparator(interaction, worksheet, answer, keywords, rowNum, firstFile);
-            interaction.channel.send('Feedback: ' + feedback)
-          
+            let feedback = await answerComparator(interaction, worksheet, answer, rowNum, firstFile);
+            interaction.channel.send('Feedback: ' + feedback);
           }
 
-          await getAnswerAndCompare(interaction, rowNum, keywords, answer, firstFile);
+          await getAnswerAndCompare(interaction, rowNum, answer, firstFile);
         }
       } catch (err) {
         console.log(err);
       }
 
-      interaction.channel.send(`Your blurt session in ${interaction.channel} has ended.`);
+      interaction.channel.send(`Your blurt session in ${interaction.channel} has finished.`);
     }
   }
 });
@@ -194,7 +230,6 @@ async function main() {
 
   try {
     console.log('Started refreshing application (/) commands.');
-    // Routes.applicationGuildCommand()
     await rest.put(Routes.applicationGuildCommands(CLIENT_ID, GUILD_ID), {
       body: commands,
     });
@@ -207,107 +242,3 @@ async function main() {
 }
 
 main();
-
-// client.on('messageCreate', (message) => {
-//   console.log('this is the message content' + message.content);
-//   if (message.attachments.first()) {
-//     console.log(message.attachments.first().url);
-//     download(message.attachments.first().url);
-//   }
-// });
-
-// client.on('messageCreate', async (message) => {
-//   let rowNum;
-//   console.log(message.content);
-//   if (message.content.startsWith('/rundeck')) {
-//     console.log(message.content);
-//     console.log(message.channel.id);
-//     if (fs.existsSync(`./src/keywordFiles/${message.channel.id}`)) {
-//       let firstFile;
-
-//       // get file
-//       fs.readdir(`./src/keywordFiles/${message.channel.id}`, (err, files) => {
-//         if (err) {
-//           console.log(err);
-//         } else {
-//           firstFile = files[0];
-//           console.log(firstFile);
-//         }
-//       });
-
-//       // xlsx set up
-//       const workbook = XLSX.readFile(firstFile); // let off here. firstFile undfined.
-//       const worksheet = workbook.Sheets['Sheet1'];
-//       const range = XLSX.utils.decode_range(worksheet['!ref']); //grabs number of rows and col in sheet
-//       console.log(range);
-
-//       // iterate through questions
-//       for (rowNum = range.s.r + 1; rowNum <= range.e.r; rowNum++) {
-//         let question = worksheet[XLSX.utils.encode_cell({ r: rowNum, c: 0 })].v;
-//         let keywords = worksheet[XLSX.utils.encode_cell({ r: rowNum, c: 2 })].v;
-
-//         await askQuestion(message, question, keywords);
-//       }
-//     }
-//   }
-
-// async function askQuestion(interaction, question, rowNum) {
-//   await interaction.channel.send('Question #' + rowNum + ': ' + question);
-
-//   // try {
-//   //   const response = await message.channel.awaitMessages({
-//   //     filter,
-//   //     max: 1,
-//   //     time: 30000,
-//   //     errors: ['time'],
-//   //   });
-
-//   //   // run comparator
-//   //   answerComparator(response.first().content, keywords);
-//   // } catch {
-//   //   await message.channel.send("Time's up");
-//   // }
-// }
-
-// get file
-// fs.readdir(
-//   `./src/keywordFiles/${interaction.channel.id}`,
-//   (err, files) => {
-//     if (err) {
-//       console.log(err);
-//     } else {
-//       firstFile = files[0];
-//       console.log('This is the first file from fs: ' + firstFile);
-//     }
-//   }
-// );
-// console.log('This is the first file: ' + firstFile);
-
-// 3) end session
-// const filter2 = (m) => m.content.startsWith('/end');
-// if (interaction.content.startsWith('/end')) {
-//   rowNum = range.e.r + 1; // end blurt session
-//   interaction.channel.send(
-//     `Blurt session for deck in channel ${interaction.channel} has ended. `
-//   );
-// }
-
-// const answer = interaction.message.content.substring(2);
-
-// async function askQuestion(interaction, question, rowNum) {
-//   await interaction.channel.send('Question #' + rowNum + ': ' + question);
-
-//   try {
-//     const response = await message.channel.awaitMessages({
-//       filter,
-//       max: 1,
-//       time: 30000,
-//       errors: ['time'],
-//     });
-
-//     // run comparator
-//     answerComparator(response.first().content, keywords);
-//   } catch {
-//     await message.channel.send("Time's up");
-//   }
-// }

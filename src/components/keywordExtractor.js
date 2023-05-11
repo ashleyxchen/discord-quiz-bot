@@ -11,48 +11,26 @@ const keywordExtractor = async (file, interaction) => {
   const channel = interaction.options.get('channel').value;
   const name = interaction.options.get('name').value;
   const workbook = XLSX.readFile(file);
-  // const buffer = Buffer.from(attachment);
 
   const worksheet = workbook.Sheets['Sheet1'];
-  const range = XLSX.utils.decode_range(worksheet['!ref']); //grabs number of rows and col in sheet
+  const range = XLSX.utils.decode_range(worksheet['!ref']);
   console.log(range);
   var keywords = [];
-  var loading = false; // loading status
 
-  // loop over every row in worksheet
   for (let rowNum = range.s.r + 1; rowNum <= range.e.r; rowNum++) {
     console.log('rowNum: ' + rowNum);
-    // let cellAnswer = worksheet[XLSX.utils.encode_cell({ r: rowNum, c: 1 })];
-    // let cellKeywords = worksheet[XLSX.utils.encode_cell({ r: rowNum, c: 2 })];
-
-    // let answer = cellAnswer && cellAnswer.v ? cellAnswer.v : '';
-    // let colKeywords = cellKeywords && cellKeywords.v ? cellKeywords.v : '';
 
     let answerCell = worksheet[XLSX.utils.encode_cell({ r: rowNum, c: 1 })];
-    let colKeywordsCell =
+    let keywordsCell =
       worksheet[XLSX.utils.encode_cell({ r: rowNum, c: 2 })] || {};
 
     let answer = '';
     let colKeywords = '';
 
     if (answerCell && answerCell.v) {
-      console.log('answercell value: ' + answerCell.v);
       answer = answerCell.v;
     }
 
-    // if (colKeywordsCell && colKeywordsCell.v) {
-    //   console.log('colKeywordsCell value: ' + colKeywordsCell.v);
-    //   colKeywords = colKeywordsCell.v;
-    // }
-
-    console.log(answer);
-    console.log(colKeywords);
-
-    // const colKeywords =
-    //   worksheet[XLSX.utils.encode_cell({ r: rowNum, c: 2 })].v;
-
-    // for logs
-    loading = true;
 
     // openai api
     const options = {
@@ -87,36 +65,21 @@ const keywordExtractor = async (file, interaction) => {
     } catch (error) {
       console.error(error);
     }
+      
+    colKeywords = keywords; // repetitive??
+    keywordsCell.v = colKeywords;
 
-    // add arr to new column in the worksheet
-    colKeywords = keywords;
-    console.log('colKeywords: ' + colKeywords + '\n\n');
-    console.log('colKeywordsCell: ' + colKeywordsCell + '\n\n');
-    colKeywordsCell.v = colKeywords;
-
-    worksheet[XLSX.utils.encode_cell({ r: rowNum, c: 2 })] = colKeywordsCell;
-    // console.log('colKeywordsCell value: ' + colKeywordsCell.v + '\n\n');
-    console.log('colKeywordsCell value: ' + worksheet[XLSX.utils.encode_cell({ r: rowNum, c: 2 })].v + '\n\n');
-
-    // if (colKeywordsCell) {
-    //   console.log('colKeywordsCell value: ' + colKeywordsCell.v + '\n\n');
-    //   colKeywordsCell.v = colKeywords;
-    // }
-
-    // if (colKeywordsCell && colKeywordsCell.v) {
-    //   console.log('colKeywordsCell value: ' + colKeywordsCell.v);
-    //   colKeywords = colKeywordsCell.v;
-    // }
+    worksheet[XLSX.utils.encode_cell({ r: rowNum, c: 2 })] = keywordsCell;
   }
 
   // export new file with keywords col filled
   const newWb = XLSX.utils.book_new();
   XLSX.utils.book_append_sheet(newWb, worksheet, 'Sheet1');
 
-  await emptyDir(`./src/keywordFiles/${channel}`)
+  await emptyDir(`./src/files/${channel}`)
     .then(() => {
       console.log(
-        `Successfully deleted previous keyword files in ./src/keywordFiles/${channel}. Importing xlsx with the keywords`
+        `Successfully deleted previous keyword files in ./src/files/${channel}. Importing xlsx with the keywords`
       );
     })
     .catch((err) => {
@@ -125,11 +88,12 @@ const keywordExtractor = async (file, interaction) => {
 
   XLSX.writeFile(
     newWb,
-    `./src/keywordFiles/${channel}/${name}_FinalkeywordFile.xlsx`
+    `./src/files/${channel}/${name}.xlsx`
   );
   console.log(
-    `Successfully updated ./src/keywordFiles/${channel}/${name}_FinalkeywordFile.xlsx with the keywords`
+    `Successfully updated ./src/files/${channel}/${name}.xlsx with the keywords`
   );
+
 };
 
 export default keywordExtractor;

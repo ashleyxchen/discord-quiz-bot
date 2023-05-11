@@ -7,7 +7,7 @@ require('dotenv').config();
 const OPENAI_API_KEY = process.env.OPENAI_API_KEY;
 const OPENAI_API_URL = process.env.OPENAI_API_URL;
 
-const answerComparator = async (interaction, worksheet, userAnswer, keywords, rowNum, firstFile) => {
+const answerComparator = async (interaction, worksheet, userAnswer, rowNum, firstFile) => {
   const channel = interaction.channel.id;
   const range = XLSX.utils.decode_range(worksheet['!ref']);
   var feedback = [];
@@ -22,23 +22,24 @@ const answerComparator = async (interaction, worksheet, userAnswer, keywords, ro
 
     const newWb = XLSX.utils.book_new();
     XLSX.utils.book_append_sheet(newWb, worksheet, 'Sheet1');
-    await emptyDir(`./src/keywordFiles/${channel}`)
+    await emptyDir(`./src/files/${channel}`)
       .then(() => {
         console.log(
-          `Successfully deleted previous keyword files in ./src/keywordFiles/${channel}. Importing xlsx with the keywords`
+          `Successfully deleted previous keyword files in ./src/files/${channel}. Importing xlsx with the keywords`
         );
       })
       .catch((err) => {
         console.error(err);
       });
 
-    XLSX.writeFile(newWb, `./src/keywordFiles/${channel}/${firstFile}`);
+    XLSX.writeFile(newWb, `./src/files/${channel}/${firstFile}`);
     console.log(`Successfully updated ${firstFile} with the matched keywords`);
   }
 
   async function compareUserAnswerToAnswer(worksheet, userAnswer, rowNum) {
     let question = worksheet[XLSX.utils.encode_cell({ r: rowNum, c: 0 })].v;
-    let actualAnswer = worksheet[XLSX.utils.encode_cell({ r: rowNum, c: 1 })].v;
+    let answerCell = worksheet[XLSX.utils.encode_cell({ r: rowNum, c: 1 })];
+    let actualAnswer = answerCell && answerCell.v ? answerCell.v : '';
 
     const options = {
       method: 'POST',
@@ -49,17 +50,19 @@ const answerComparator = async (interaction, worksheet, userAnswer, keywords, ro
       body: JSON.stringify({
         model: 'text-davinci-003',
         prompt:
-          'Compare the my answer of the question to the actual answer . \n\n' +
+          'Compare the my answer of the question to the correct answer . \n\n' +
           'Question: \n' +
           question +
           '\n\n' +
           'My answer: \n' +
           userAnswer +
           '\n\n' +
-          'Actual answer: \n' +
+          'Correct answer: \n' +
           actualAnswer +
           '\n\n' +
-          'Return if my answer is correct. If the my answer is partially correct, also add where my misunderstanding is.',
+          'Return if my answer is correct.' + 
+          'If there is no correct answer provided, compare my answer to that you would answer to the question.' + 
+          'If the my answer is partially correct, also add where my misunderstanding is.',
         temperature: 0.5,
         max_tokens: 60,
         top_p: 1.0,
