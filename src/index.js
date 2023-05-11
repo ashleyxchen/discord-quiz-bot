@@ -96,40 +96,10 @@ client.on('interactionCreate', (interaction) => {
       });
     }
 
-    // if (interaction.commandName === 'rundeck') {
-    // async function askQuestion(message, question, keywords) {
-    //   await message.channel.send('Question #' + rowNum + ': ' + question);
-    //   try {
-    //     const response = await message.channel.awaitMessages({
-    //       filter,
-    //       max: 1,
-    //       time: 30000,
-    //       errors: ['time'],
-    //     });
-    //     // run comparator
-    //     answerComparator(response.first().content, keywords);
-    //   } catch {
-    //     await message.channel.send("Time's up");
-    //   }
-    // }
-    // // iterate through questions
-    // }
-    // run subcommands
-
-    // start the blurt session
-    // set boolean to true sessionActive
-
-    // interaction.reply({
-    //   content: 'Blurt Session for deck' +  interaction.options.get('name').value + ' will begin now.'
-    // });
-
-    // loop questions and intake answers
 
     if (interaction.commandName === 'end') {
-      // add condition statement to check is session is Active
       interaction.reply({
         content: `Blurt Session for deck "${interaction.options.get('name').value}" has ended`,
-        // print results here too
       });
     }
   }
@@ -170,30 +140,22 @@ client.on('interactionCreate', async (interaction) => {
       interaction.reply(`The blurt session for ${interaction.channel} will begin`);
       interactionState = 'awaitingAnswer';
 
-      // 1) get file contents
       try {
         let worksheet = await getFile(interaction);
-
-        // await getFile(interaction, workbook, worksheet);
         const range = XLSX.utils.decode_range(worksheet['!ref']);
         console.log(range);
 
-        // 2) iterate through questons
-
+        // Iterate through questons
         for (let rowNum = range.s.r + 1; rowNum <= range.e.r; rowNum++) {
           let question = worksheet[XLSX.utils.encode_cell({ r: rowNum, c: 0 })].v;
-          console.log(question);
-
           let keywords = worksheet[XLSX.utils.encode_cell({ r: rowNum, c: 2 })].v;
-          console.log('worksheet in index: ' + worksheet);
 
-          // await askQuestion(interaction, message, question, keywords, rowNum);
           await interaction.channel.send('Question #' + rowNum + ': ' + question);
           const filter = (m) => m.content.startsWith('/a');
           const userAnswer = await interaction.channel.awaitMessages({
             filter,
             max: 1,
-            time: 300000, // 5 minutes for answer
+            time: 300000, 
           });
 
           if (!userAnswer.size) {
@@ -202,12 +164,8 @@ client.on('interactionCreate', async (interaction) => {
           }
 
           const answer = userAnswer.first().content.slice(3);
-          await interaction.followUp(`You answered: ${answer}`);
 
-          console.log('first file prior to calling answer comparator: ' + firstFile);
-
-          // TO DO: need to mock logic like keyword extractor with download() & downloadAndExtractKeywords
-          async function getAndCompareKeywords(interaction, rowNum, keywords, answer, firstFile) {
+          async function getAnswerAndCompare(interaction, rowNum, keywords, answer, firstFile) {
             let worksheet = await getFile(interaction);
 
             if (worksheet === null) {
@@ -215,11 +173,12 @@ client.on('interactionCreate', async (interaction) => {
               return;
             }
 
-            await answerComparator(interaction, worksheet, answer, keywords, rowNum, firstFile);
-            
+            let feedback = await answerComparator(interaction, worksheet, answer, keywords, rowNum, firstFile);
+            interaction.channel.send('Feedback: ' + feedback)
+          
           }
 
-          getAndCompareKeywords(interaction, rowNum, keywords, answer, firstFile);
+          await getAnswerAndCompare(interaction, rowNum, keywords, answer, firstFile);
         }
       } catch (err) {
         console.log(err);
