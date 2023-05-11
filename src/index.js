@@ -1,4 +1,4 @@
-import { Client, Events, GatewayIntentBits, Routes } from 'discord.js';
+import { Client, GatewayIntentBits, Routes } from 'discord.js';
 import { REST } from '@discordjs/rest';
 import { config } from 'dotenv';
 import setDeckCommand from './commands/setDeck.js';
@@ -17,11 +17,7 @@ const CLIENT_ID = process.env.CLIENT_ID;
 const GUILD_ID = process.env.GUILD_ID;
 
 const client = new Client({
-  intents: [
-    GatewayIntentBits.Guilds,
-    GatewayIntentBits.GuildMessages,
-    GatewayIntentBits.MessageContent,
-  ],
+  intents: [GatewayIntentBits.Guilds, GatewayIntentBits.GuildMessages, GatewayIntentBits.MessageContent],
 });
 
 const rest = new REST({ version: '10' }).setToken(TOKEN);
@@ -35,9 +31,7 @@ async function download(url, name, channel) {
   if (fs.existsSync(`./src/keywordFiles/${channel}`)) {
     await emptyDir(`./src/keywordFiles/${channel}`)
       .then(() => {
-        console.log(
-          `Successfully deleted previous keyword files in ./src/keywordFiles/${channel}`
-        );
+        console.log(`Successfully deleted previous keyword files in ./src/keywordFiles/${channel}`);
       })
       .catch((err) => {
         console.error(err);
@@ -49,15 +43,9 @@ async function download(url, name, channel) {
         .on('error', (err) => {
           reject(err);
         })
-        .pipe(
-          fs.createWriteStream(
-            `./src/keywordFiles/${channel}/${name}_keywordFile.xlsx`
-          )
-        )
+        .pipe(fs.createWriteStream(`./src/keywordFiles/${channel}/${name}_keywordFile.xlsx`))
         .on('close', () => {
-          console.log(
-            `Successfully added to ./src/keywordFiles/${channel}/${name}_keywordFile.xlsx`
-          );
+          console.log(`Successfully added to ./src/keywordFiles/${channel}/${name}_keywordFile.xlsx`);
           resolve();
         });
     });
@@ -73,15 +61,9 @@ async function download(url, name, channel) {
             .on('error', (err) => {
               reject(err);
             })
-            .pipe(
-              fs.createWriteStream(
-                `./src/keywordFiles/${channel}/${name}_keywordFile.xlsx`
-              )
-            )
+            .pipe(fs.createWriteStream(`./src/keywordFiles/${channel}/${name}_keywordFile.xlsx`))
             .on('close', () => {
-              console.log(
-                `Successfully added to ./src/keywordFiles/${channel}/${name}_keywordFile.xlsx`
-              );
+              console.log(`Successfully added to ./src/keywordFiles/${channel}/${name}_keywordFile.xlsx`);
               resolve();
             });
         }
@@ -98,30 +80,19 @@ client.on('interactionCreate', (interaction) => {
       let name = interaction.options.get('name').value;
       let url = interaction.options.getAttachment('attachment').url;
 
-      console.log(
-        'the attachment url is ' +
-          interaction.options.getAttachment('attachment').url
-      );
+      console.log('the attachment url is ' + interaction.options.getAttachment('attachment').url);
 
-      async function downloadAndExtractKeywords(
-        url,
-        name,
-        channel,
-        interaction
-      ) {
+      async function downloadAndExtractKeywords(url, name, channel, interaction) {
         await download(url, name, channel);
-        await keywordExtractor(
-          `./src/keywordFiles/${channel}/${name}_keywordFile.xlsx`,
-          interaction
-        );
+        await keywordExtractor(`./src/keywordFiles/${channel}/${name}_keywordFile.xlsx`, interaction);
       }
 
       downloadAndExtractKeywords(url, name, channel, interaction);
 
       interaction.reply({
-        content: `Your deck "${
-          interaction.options.get('name').value
-        }" is in channel "${interaction.options.get('channel').channel}."`,
+        content: `Your deck "${interaction.options.get('name').value}" is in channel "${
+          interaction.options.get('channel').channel
+        }."`,
       });
     }
 
@@ -157,9 +128,7 @@ client.on('interactionCreate', (interaction) => {
     if (interaction.commandName === 'end') {
       // add condition statement to check is session is Active
       interaction.reply({
-        content: `Blurt Session for deck "${
-          interaction.options.get('name').value
-        }" has ended`,
+        content: `Blurt Session for deck "${interaction.options.get('name').value}" has ended`,
         // print results here too
       });
     }
@@ -169,99 +138,97 @@ client.on('interactionCreate', (interaction) => {
 let interactionState = '';
 let firstFile;
 
+async function getFile(interaction) {
+  let channel = interaction.channel.id;
+
+  if (fs.existsSync(`./src/keywordFiles/${channel}`)) {
+    const files = await new Promise((resolve, reject) => {
+      fs.readdir(`./src/keywordFiles/${channel}`, (err, files) => {
+        if (err) reject(err);
+        else resolve(files);
+      });
+    }).catch((err) => {
+      console.error(err);
+      return null;
+    });
+
+    firstFile = files[0];
+    console.log('This is the first file: ' + firstFile);
+
+    let workbook = XLSX.readFile(`./src/keywordFiles/${channel}/${firstFile}`);
+    let worksheet = workbook.Sheets['Sheet1'];
+    return worksheet;
+  } else {
+    console.log('File not found.');
+    return null;
+  }
+}
 
 client.on('interactionCreate', async (interaction) => {
   if (interaction.isChatInputCommand()) {
     if (interaction.commandName === 'rundeck') {
-      interaction.reply(
-        `The blurt session for ${interaction.channel} will begin`
-      );
+      interaction.reply(`The blurt session for ${interaction.channel} will begin`);
       interactionState = 'awaitingAnswer';
 
       // 1) get file contents
       try {
-        if (fs.existsSync(`./src/keywordFiles/${interaction.channel.id}`)) {
-          const files = await new Promise((resolve, reject) => {
-            fs.readdir(`./src/keywordFiles/${interaction.channel.id}`, (err, files) => {
-              if (err) reject(err);
-              else resolve(files);
-            });
+        let worksheet = await getFile(interaction);
+
+        // await getFile(interaction, workbook, worksheet);
+        const range = XLSX.utils.decode_range(worksheet['!ref']);
+        console.log(range);
+
+        // 2) iterate through questons
+
+        for (let rowNum = range.s.r + 1; rowNum <= range.e.r; rowNum++) {
+          let question = worksheet[XLSX.utils.encode_cell({ r: rowNum, c: 0 })].v;
+          console.log(question);
+
+          let keywords = worksheet[XLSX.utils.encode_cell({ r: rowNum, c: 2 })].v;
+          console.log('worksheet in index: ' + worksheet);
+
+          // await askQuestion(interaction, message, question, keywords, rowNum);
+          await interaction.channel.send('Question #' + rowNum + ': ' + question);
+          const filter = (m) => m.content.startsWith('/a');
+          const userAnswer = await interaction.channel.awaitMessages({
+            filter,
+            max: 1,
+            time: 300000, // 5 minutes for answer
           });
-      
-          firstFile = files[0];
-          console.log('This is the first file: ' + firstFile);
 
-          // xlsx set up
-          const workbook = XLSX.readFile(`./src/keywordFiles/${interaction.channel.id}/${firstFile}`); // let off here. firstFile undfined.
-          const worksheet = workbook.Sheets['Sheet1'];
-          const range = XLSX.utils.decode_range(worksheet['!ref']);
-          console.log(range);
+          if (!userAnswer.size) {
+            await interaction.followUp('Time is up! Next question.');
+            break;
+          }
 
-          // 2) iterate through questons
+          const answer = userAnswer.first().content.slice(3);
+          await interaction.followUp(`You answered: ${answer}`);
 
-          for (let rowNum = range.s.r + 1; rowNum <= range.e.r; rowNum++) {
-            let question =
-              worksheet[XLSX.utils.encode_cell({ r: rowNum, c: 0 })].v;
-              console.log(question)
-            let keywords =
-              worksheet[XLSX.utils.encode_cell({ r: rowNum, c: 2 })].v;
+          console.log('first file prior to calling answer comparator: ' + firstFile);
 
-            // await askQuestion(interaction, message, question, keywords, rowNum);
-            await interaction.channel.send('Question #' + rowNum + ': ' + question);
-            const filter = (m) => m.content.startsWith('/a');
-            const userAnswer = await interaction.channel.awaitMessages({
-              filter,
-              max: 1,
-              time: 300000, // 5 minutes for answer
-            });
+          // TO DO: need to mock logic like keyword extractor with download() & downloadAndExtractKeywords
+          async function getAndCompareKeywords(interaction, rowNum, keywords, answer, firstFile) {
+            let worksheet = await getFile(interaction);
 
-            if (!userAnswer.size) {
-              await interaction.followUp('Time is up! Next question.');
-              break;
+            if (worksheet === null) {
+              console.log('Error: worksheet is null.');
+              return;
             }
 
-            // 3) end session
-            // const filter2 = (m) => m.content.startsWith('/end');
-            // if (interaction.content.startsWith('/end')) {
-            //   rowNum = range.e.r + 1; // end blurt session
-            //   interaction.channel.send(
-            //     `Blurt session for deck in channel ${interaction.channel} has ended. `
-            //   );
-            // }
-
-            // const answer = interaction.message.content.substring(2);
-            const answer = userAnswer.first().content.slice(3);
-            await interaction.followUp(`You answered: ${answer}`);
-
-            answerComparator(interaction, firstFile, answer, keywords, worksheet, rowNum);
+            await answerComparator(interaction, worksheet, answer, keywords, rowNum, firstFile);
+            
           }
+
+          getAndCompareKeywords(interaction, rowNum, keywords, answer, firstFile);
         }
       } catch (err) {
         console.log(err);
       }
 
-      interaction.channel.send(`Your blurt session in ${interaction.channel} has ended.`)
+      interaction.channel.send(`Your blurt session in ${interaction.channel} has ended.`);
     }
   }
 });
-
-async function askQuestion(interaction, question, rowNum) {
-  await interaction.channel.send('Question #' + rowNum + ': ' + question);
-
-  // try {
-  //   const response = await message.channel.awaitMessages({
-  //     filter,
-  //     max: 1,
-  //     time: 30000,
-  //     errors: ['time'],
-  //   });
-
-  //   // run comparator
-  //   answerComparator(response.first().content, keywords);
-  // } catch {
-  //   await message.channel.send("Time's up");
-  // }
-}
 
 async function main() {
   const commands = [setDeckCommand, runDeckCommand];
@@ -344,15 +311,44 @@ main();
 // }
 
 // get file
-          // fs.readdir(
-          //   `./src/keywordFiles/${interaction.channel.id}`,
-          //   (err, files) => {
-          //     if (err) {
-          //       console.log(err);
-          //     } else {
-          //       firstFile = files[0];
-          //       console.log('This is the first file from fs: ' + firstFile);
-          //     }
-          //   }
-          // );
-          // console.log('This is the first file: ' + firstFile);
+// fs.readdir(
+//   `./src/keywordFiles/${interaction.channel.id}`,
+//   (err, files) => {
+//     if (err) {
+//       console.log(err);
+//     } else {
+//       firstFile = files[0];
+//       console.log('This is the first file from fs: ' + firstFile);
+//     }
+//   }
+// );
+// console.log('This is the first file: ' + firstFile);
+
+// 3) end session
+// const filter2 = (m) => m.content.startsWith('/end');
+// if (interaction.content.startsWith('/end')) {
+//   rowNum = range.e.r + 1; // end blurt session
+//   interaction.channel.send(
+//     `Blurt session for deck in channel ${interaction.channel} has ended. `
+//   );
+// }
+
+// const answer = interaction.message.content.substring(2);
+
+// async function askQuestion(interaction, question, rowNum) {
+//   await interaction.channel.send('Question #' + rowNum + ': ' + question);
+
+//   try {
+//     const response = await message.channel.awaitMessages({
+//       filter,
+//       max: 1,
+//       time: 30000,
+//       errors: ['time'],
+//     });
+
+//     // run comparator
+//     answerComparator(response.first().content, keywords);
+//   } catch {
+//     await message.channel.send("Time's up");
+//   }
+// }
