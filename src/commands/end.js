@@ -9,8 +9,4 @@ const endCommand = new SlashCommandBuilder()
             .setDescription('End current blurt session')
     })
 
-    // add end session command
-        // once session ends, spit back results, and attachment of text analysis vs answer
-    // add skip question
-
     export default endCommand.toJSON()

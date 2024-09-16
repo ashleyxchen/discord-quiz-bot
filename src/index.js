@@ -4,224 +4,162 @@ import { config } from 'dotenv';
 import setDeckCommand from './commands/setDeck.js';
 import runDeckCommand from './commands/runDeck.js';
 import answerComparator from './components/answerComparator.js';
-import request from 'request';
-import fs from 'fs';
-import { emptyDir } from 'fs-extra';
 import XLSX from 'xlsx';
+import Deck from './models/Deck.js';
+import Question from './models/Question.js';
+import User from './models/User.js';
 
 config();
 
 const TOKEN = process.env.TOKEN;
 const CLIENT_ID = process.env.CLIENT_ID;
 const GUILD_ID = process.env.GUILD_ID;
+const MONGODB_URI = process.env.MONGODB_URI;
 
+// start client
 const client = new Client({
   intents: [GatewayIntentBits.Guilds, GatewayIntentBits.GuildMessages, GatewayIntentBits.MessageContent],
 });
 
 const rest = new REST({ version: '10' }).setToken(TOKEN);
 
+// start db
+mongoose
+  .connect(MONGODB_URI, { useNewUrlParser: true, useUnifiedTopology: true })
+  .then(() => console.log('MongoDB connected'))
+  .catch((err) => console.error('MongoDB connection error:', err));
+
 client.on('ready', () => {
   console.log(`${client.user.tag} has logged in`);
 });
 
-// TODO: condense download function
-async function download(url, name, channel) {
-  if (fs.existsSync(`./src/files/${channel}`)) {
-    await emptyDir(`./src/files/${channel}`)
-      .then(() => {
-        console.log(`Successfully deleted previous keyword files in ./src/files/${channel}`);
-      })
-      .catch((err) => {
-        console.error(err);
-      });
+async function downloadAndSaveDeck(url, name, channelId, userId) {
+  // download the file
+  const response = await fetch(url);
+  const buffer = await response.buffer();
 
-    return new Promise((resolve, reject) => {
-      request
-        .get(url)
-        .on('error', (err) => {
-          reject(err);
-        })
-        .pipe(fs.createWriteStream(`./src/files/${channel}/${name}.xlsx`))
-        .on('close', () => {
-          console.log(`Successfully added to ./src/files/${channel}/${name}.xlsx`);
-          resolve();
-        });
+  // parse the XLSX file
+  const workbook = XLSX.read(buffer, { type: 'buffer' });
+  const worksheet = workbook.Sheets['Sheet1'];
+  const range = XLSX.utils.decode_range(worksheet['!ref']);
+
+  const questions = [];
+  for (let rowNum = range.s.r + 1; rowNum <= range.e.r; rowNum++) {
+    const question = worksheet[XLSX.utils.encode_cell({ r: rowNum, c: 0 })].v;
+    const correctAnswer = worksheet[XLSX.utils.encode_cell({ r: rowNum, c: 1 })].v;
+
+    const newQuestion = new Question({
+      question: question,
+      correctAnswer: correctAnswer,
     });
-  } else {
-    return new Promise((resolve, reject) => {
-      fs.mkdir(`./src/files/${channel}`, (err) => {
-        if (err) {
-          console.error(err);
-          reject(err);
-        } else {
-          request
-            .get(url)
-            .on('error', (err) => {
-              reject(err);
-            })
-            .pipe(fs.createWriteStream(`./src/files/${channel}/${name}.xlsx`))
-            .on('close', () => {
-              console.log(`Successfully added to ./src/files/${channel}/${name}.xlsx`);
-              resolve();
-            });
-        }
-      });
+    await newQuestion.save();
+
+    questions.push(newQuestion._id); // Store question IDs
+  }
+
+  const newDeck = new Deck({
+    name: name,
+    channelId: channelId,
+    questions: questions,
+  });
+  await newDeck.save();
+
+  let user = await User.findOne({ discordId: userId });
+  if (!user) {
+    user = new User({
+      discordId: userId,
+      username: interaction.user.username,
+      studyDecks: [],
     });
   }
-}
+  user.studyDecks.push(newDeck._id);
+  await user.save();
 
-client.on('interactionCreate', (interaction) => {
-  if (interaction.isChatInputCommand()) {
-    if (interaction.commandName === 'setdeck') {
-      console.log('Creating new deck command');
-      let channel = interaction.options.get('channel').value;
-      let name = interaction.options.get('name').value;
-      let url = interaction.options.getAttachment('attachment').url;
-
-      console.log('the attachment url is ' + interaction.options.getAttachment('attachment').url);
-
-      async function downloadAndExtractKeywords(url, name, channel) {
-        await download(url, name, channel);
-      }
-
-      downloadAndExtractKeywords(url, name, channel, interaction);
-
-      interaction.reply({
-        content: `Your deck "${interaction.options.get('name').value}" is in channel "${
-          interaction.options.get('channel').channel
-        }."`,
-      });
-    }
-
-    if (interaction.commandName === 'end') {
-      interaction.reply({
-        content: `Blurt Session for deck "${interaction.options.get('name').value}" has ended`,
-      });
-    }
-  }
-});
-
-let interactionState = '';
-let firstFile;
-
-async function getFile(interaction) {
-  let channel = interaction.channel.id;
-
-  if (fs.existsSync(`./src/files/${channel}`)) {
-    const files = await new Promise((resolve, reject) => {
-      fs.readdir(`./src/files/${channel}`, (err, files) => {
-        if (err) reject(err);
-        else resolve(files);
-      });
-    }).catch((err) => {
-      console.error(err);
-      return null;
-    });
-
-    firstFile = files[0];
-
-    let workbook = XLSX.readFile(`./src/files/${channel}/${firstFile}`);
-    let worksheet = workbook.Sheets['Sheet1'];
-    return worksheet;
-  } else {
-    console.log('File not found.');
-    return null;
-  }
+  console.log(`Successfully saved deck "${name}" to MongoDB for channel ${channelId}`);
 }
 
 client.on('interactionCreate', async (interaction) => {
-  if (interaction.isChatInputCommand()) {
-    if (interaction.commandName === 'rundeck') {
-      interaction.reply(`The blurt session for ${interaction.channel} will begin`);
-      interactionState = 'awaitingAnswer';
+  if (interaction.commandName === 'setdeck') {
+    const channelId = interaction.options.get('channel').value;
+    const name = interaction.options.get('name').value;
+    const url = interaction.options.getAttachment('attachment').url;
+    const userId = interaction.user.id;
 
-      try {
-        let worksheet = await getFile(interaction);
-        const range = XLSX.utils.decode_range(worksheet['!ref']);
-        console.log(range);
+    await downloadAndSaveDeck(url, name, channelId, userId);
 
-        // Iterate through questons
-        for (let rowNum = range.s.r + 1; rowNum <= range.e.r; rowNum++) {
-          let question = worksheet[XLSX.utils.encode_cell({ r: rowNum, c: 0 })].v;
+    interaction.reply(
+      `Your deck "${name}" is saved in MongoDB for channel "${interaction.options.get('channel').channel}".`
+    );
+  }
+});
 
-          await interaction.channel.send('Question #' + rowNum + ': ' + question);
+async function getDeckFromDB(channelId, userId) {
+  if (userId) {
+    const user = await User.findOne({ discordId: userId }).populate('studyDecks');
+    if (user && user.studyDecks.length > 0) {
+      return user.studyDecks;
+    }
+  }
 
-          const filterAnswer = (m) => m.content.startsWith('/a');
-          const filterEnd = (m) => m.content.startsWith('/end');
-          let doBreak = false;
+  const deck = await Deck.findOne({ channelId: channelId }).populate('questions');
+  if (!deck) {
+    console.log('No deck found in MongoDB for channel:', channelId);
+    return null;
+  }
+  return deck;
+}
 
-          const userAnswer = await interaction.channel.awaitMessages({
-            filter: filterAnswer,
-            max: 1,
-            time: 300000,
-          });
+client.on('interactionCreate', async (interaction) => {
+  if (interaction.commandName === 'rundeck') {
+    interaction.reply(`The blurt session for ${interaction.channel} will begin`);
 
-          // endAnswer = interaction.channel.awaitMessages({
-          //   filter: filterEnd,
-          //   max: 1,
-          //   time: 300000,
-          // });
+    const deck = await getDeckFromDB(interaction.channel.id, interaction.user.id);
+    if (!deck) {
+      interaction.reply(`No deck found for this channel or user.`);
+      return;
+    }
 
-          // console.log(endAnswer)
+    const questions = deck.questions;
 
-          const endAnswer = interaction.channel.awaitMessages({
-            filter: filterEnd,
-            max: 1,
-            time: 300000,
-          });
+    for (let i = 0; i < questions.length; i++) {
+      const question = questions[i].question;
+      const questionId = questions[i]._id;
 
-          // Wait for both promises to resolve
-          await Promise.all([userAnswer, endAnswer]).then((results) => {
-            const userMessage = results[0].first(); // Get the first (and only) message in userAnswer
-            const endMessage = results[1].first(); // Get the first (and only) message in endAnswer
+      await interaction.channel.send(`Question #${i + 1}: ${question}`);
 
-            if (endMessage && endMessage.content.startsWith('/end')) {
-              console.log('User ended the quiz.');
-              doBreak = true;
-            } else {
-              console.log('User did not end the quiz.');
-              // Do something else here
-            }
-          });
+      const filterAnswer = (m) => m.content.startsWith('/a');
+      let doBreak = false;
 
-          if (!userAnswer.size) {
-            await interaction.followUp('Time is up! Next question.');
-            continue;
-          }
+      const userAnswer = await interaction.channel.awaitMessages({
+        filter: filterAnswer,
+        max: 1,
+        time: 300000,
+      });
 
-          // if (endAnswer != '') {
-          //   console.log('broken!!!');
-          //   break;
-          // }
-
-          if (doBreak == true) {
-            interaction.channel.send(`Your blurt session in ${interaction.channel} has ended.`);
-            break;
-          }
-
-          const answer = userAnswer.first().content.slice(3);
-
-          async function getAnswerAndCompare(interaction, rowNum, answer, firstFile) {
-            let worksheet = await getFile(interaction);
-
-            if (worksheet === null) {
-              console.log('Error: worksheet is null.');
-              return;
-            }
-
-            let feedback = await answerComparator(interaction, worksheet, answer, rowNum, firstFile);
-            interaction.channel.send('Feedback: ' + feedback);
-          }
-
-          await getAnswerAndCompare(interaction, rowNum, answer, firstFile);
-        }
-      } catch (err) {
-        console.log(err);
+      if (!userAnswer.size) {
+        await interaction.followUp('Time is up! Next question.');
+        continue;
       }
 
-      interaction.channel.send(`Your blurt session in ${interaction.channel} has finished.`);
+      const answer = userAnswer.first().content.slice(3);
+
+      // call answerComparator with the questionId and save feedback
+      const feedback = await answerComparator(interaction, questionId, answer);
+
+      interaction.channel.send(`Feedback for your answer: ${feedback}`);
     }
+
+    interaction.channel.send(`Your blurt session in ${interaction.channel} has finished.`);
+  }
+});
+
+client.on('interactionCreate', async (interaction) => {
+  if (!interaction.isChatInputCommand()) return;
+
+  if (interaction.commandName === 'end' && interaction.options.getSubcommand() === 'session') {
+    await interaction.reply({
+      content: 'Blurt session has ended. Your results are saved in the inputted sheet',
+    });
   }
 });
 
